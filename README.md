@@ -82,6 +82,8 @@ Having only one example query (e.g., about torque specs) made it hard to fine-tu
 
 ## Ideas for Improvement
 
+- **Framework Integration**: Using a framework like LlamaIndex could be beneficial for building the pipeline, as it provides many out-of-the-box features for data ingestion, chunking, and retrieval indexing.
+- **OCR Support**: Adding Optical Character Recognition (OCR) support would allow the pipeline to extract text from scanned PDFs or images within the manuals that are not natively text-selectable.
 - **RAG Evaluation Pipeline**: Setting up a testing framework (eg. RAGAS) to evaluate the RAG pipeline with a variety of test queries would be a great next step. By scoring how accurate the search results are, we could scientifically find the sweet spot for the `--target-tokens` and `--overlap-tokens` variables. This would make sure chunks are perfectly sized to isolate correct data blocks without pulling in useless noise.
 - **Dynamic Chunk Sizing**: Experimenting with dynamic chunk sizes based on the type of content (e.g., smaller chunks for dense tables, larger chunks for long procedures) could further improve search accuracy.
 - **Better LLM Prompting**: Testing and providing more examples (few-shot prompting) directly in the LLM's system prompt could further guide the model to output even more consistent JSON data for edge-case queries.

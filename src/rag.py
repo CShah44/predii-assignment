@@ -184,17 +184,13 @@ def strip_repeated_page_boilerplate(pages: Sequence[Dict[str, Any]]) -> List[Dic
     return cleaned
 
 
-def extract_pages(pdf_path: Path, use_ocr: bool = False) -> List[Dict[str, Any]]:
+def extract_pages(pdf_path: Path) -> List[Dict[str, Any]]:
     page_chunks = pymupdf4llm.to_markdown(
         str(pdf_path),
         page_chunks=True,
         ignore_images=True,
         table_strategy="lines_strict",
         show_progress=False,
-        header=False,
-        footer=False,
-        use_ocr=use_ocr,
-        force_ocr=False,
     )
     if isinstance(page_chunks, str):
         return [{"metadata": {"page": 1}, "text": sanitize_markdown(page_chunks)}]
@@ -291,57 +287,61 @@ def get_default_flags() -> Dict[str, bool]:
     }
 
 
-def build_chunks(pages: Sequence[Dict[str, Any]], source: str, config: ChunkConfig) -> List[Dict[str, Any]]:
-    chunks: List[Dict[str, Any]] = []
-    heading_path: List[str] = []
+class ChunkBuilder:
+    def __init__(self, source: str, config: ChunkConfig):
+        self.source = source
+        self.config = config
+        self.chunks: List[Dict[str, Any]] = []
+        self.heading_path: List[str] = []
+        
+        self.current_parts: List[str] = []
+        self.current_tokens = 0
+        self.current_start_page = None
+        self.current_end_page = None
+        self.current_flags = get_default_flags()
+        self.last_chunk_body = ""
+        self.last_heading_path = ""
 
-    current_parts: List[str] = []
-    current_tokens = 0
-    current_start_page = None
-    current_end_page = None
-    current_flags = get_default_flags()
-    last_chunk_body = ""
-    last_heading_path = ""
-
-    def flush_chunk() -> None:
-        nonlocal current_parts, current_tokens, current_start_page, current_end_page, current_flags
-        nonlocal last_chunk_body, last_heading_path
-
-        if not current_parts:
+    def flush(self) -> None:
+        if not self.current_parts:
             return
 
-        body = "\n\n".join(current_parts).strip()
-        if approx_token_count(body) < config.min_tokens and chunks:
-            chunks[-1]["body"] = chunks[-1]["body"] + "\n\n" + body
-            chunks[-1]["text"] = chunks[-1]["text"] + "\n\n" + body
-            chunks[-1]["page_end"] = current_end_page
-            for key, val in current_flags.items():
-                chunks[-1][key] = chunks[-1].get(key, False) or val
+        body = "\n\n".join(self.current_parts).strip()
+        if approx_token_count(body) < self.config.min_tokens and self.chunks:
+            self.chunks[-1]["body"] = self.chunks[-1]["body"] + "\n\n" + body
+            self.chunks[-1]["text"] = self.chunks[-1]["text"] + "\n\n" + body
+            self.chunks[-1]["page_end"] = self.current_end_page
+            for key, val in self.current_flags.items():
+                self.chunks[-1][key] = self.chunks[-1].get(key, False) or val
         else:
-            section_path = " > ".join(heading_path).strip()
+            section_path = " > ".join(self.heading_path).strip()
             prefix = f"Section: {section_path}\n\n" if section_path else ""
             text_for_embedding = prefix + body
-            chunk_index = len(chunks)
+            chunk_index = len(self.chunks)
             chunk = {
-                "id": stable_chunk_id(source, chunk_index, text_for_embedding),
-                "source": source,
+                "id": stable_chunk_id(self.source, chunk_index, text_for_embedding),
+                "source": self.source,
                 "chunk_index": chunk_index,
                 "section_path": section_path,
-                "page_start": current_start_page,
-                "page_end": current_end_page,
+                "page_start": self.current_start_page,
+                "page_end": self.current_end_page,
                 "body": body,
                 "text": text_for_embedding,
-                **current_flags,
+                **self.current_flags,
             }
-            chunks.append(chunk)
-            last_chunk_body = body
-            last_heading_path = section_path
+            self.chunks.append(chunk)
+            self.last_chunk_body = body
+            self.last_heading_path = section_path
 
-        current_parts = []
-        current_tokens = 0
-        current_start_page = None
-        current_end_page = None
-        current_flags = get_default_flags()
+        self.current_parts = []
+        self.current_tokens = 0
+        self.current_start_page = None
+        self.current_end_page = None
+        self.current_flags = get_default_flags()
+
+
+def build_chunks(pages: Sequence[Dict[str, Any]], source: str, config: ChunkConfig) -> List[Dict[str, Any]]:
+    builder = ChunkBuilder(source, config)
 
     for page in pages:
         page_number = page.get("metadata", {}).get("page") or page.get("metadata", {}).get("page_number")
@@ -356,12 +356,12 @@ def build_chunks(pages: Sequence[Dict[str, Any]], source: str, config: ChunkConf
             if btype == "heading":
                 heading_match = HEADING_RE.match(btext)
                 if heading_match:
-                    flush_chunk()
+                    builder.flush()
                     level = len(heading_match.group(1))
                     title = heading_match.group(2).strip()
-                    while len(heading_path) >= level:
-                        heading_path.pop()
-                    heading_path.append(title)
+                    while len(builder.heading_path) >= level:
+                        builder.heading_path.pop()
+                    builder.heading_path.append(title)
                 continue
 
             btoken = approx_token_count(btext)
@@ -372,28 +372,28 @@ def build_chunks(pages: Sequence[Dict[str, Any]], source: str, config: ChunkConf
 
             for part in split_parts:
                 part_tokens = approx_token_count(part)
-                if current_tokens and current_tokens + part_tokens > config.target_tokens:
-                    flush_chunk()
-                    if last_chunk_body and " > ".join(heading_path) == last_heading_path and config.overlap_tokens > 0:
-                        overlap = tail_words(last_chunk_body, config.overlap_tokens)
+                if builder.current_tokens and builder.current_tokens + part_tokens > config.target_tokens:
+                    builder.flush()
+                    if builder.last_chunk_body and " > ".join(builder.heading_path) == builder.last_heading_path and config.overlap_tokens > 0:
+                        overlap = tail_words(builder.last_chunk_body, config.overlap_tokens)
                         if overlap:
-                            current_parts.append(f"Context overlap: {overlap}")
-                            current_tokens += approx_token_count(overlap)
-                if current_start_page is None:
-                    current_start_page = page_number
-                current_end_page = page_number
-                current_parts.append(part)
-                current_tokens += part_tokens
+                            builder.current_parts.append(f"Context overlap: {overlap}")
+                            builder.current_tokens += approx_token_count(overlap)
+                if builder.current_start_page is None:
+                    builder.current_start_page = page_number
+                builder.current_end_page = page_number
+                builder.current_parts.append(part)
+                builder.current_tokens += part_tokens
                 
                 lowered = part.lower()
-                current_flags["contains_procedure"] |= (btype == "procedure")
-                current_flags["contains_table"] |= (btype == "table")
-                current_flags["contains_warning"] |= any(w in lowered for w in ("warning", "caution"))
-                current_flags["contains_torque_specs"] |= any(w in lowered for w in ("torque", "lb-ft", "nm"))
-                current_flags["contains_materials"] |= any(w in lowered for w in ("material", "lubricant", "sealant"))
+                builder.current_flags["contains_procedure"] |= (btype == "procedure")
+                builder.current_flags["contains_table"] |= (btype == "table")
+                builder.current_flags["contains_warning"] |= any(w in lowered for w in ("warning", "caution"))
+                builder.current_flags["contains_torque_specs"] |= any(w in lowered for w in ("torque", "lb-ft", "nm"))
+                builder.current_flags["contains_materials"] |= any(w in lowered for w in ("material", "lubricant", "sealant"))
 
-    flush_chunk()
-    return chunks
+    builder.flush()
+    return builder.chunks
 
 
 def write_chunks_jsonl(chunks: Iterable[Dict[str, Any]], out_path: Path) -> None:
@@ -409,9 +409,8 @@ def ingest(
     collection_name: str,
     model_name: str,
     chunks_out: Path,
-    use_ocr: bool,
 ) -> None:
-    pages = extract_pages(pdf_path, use_ocr=use_ocr)
+    pages = extract_pages(pdf_path)
     config = ChunkConfig()
     chunks = build_chunks(pages, source=str(pdf_path), config=config)
 
@@ -609,7 +608,6 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Path to write generated chunks as JSONL",
     )
-    ingest_parser.add_argument("--use-ocr", action="store_true", help="Enable OCR fallback in extraction")
 
     query_parser = subparsers.add_parser("query", help="Query existing Chroma index")
     query_parser.add_argument("--db", default=Path("data/processed/chroma"), type=Path, help="Chroma persistence directory")
@@ -661,7 +659,6 @@ def main() -> None:
             collection_name=args.collection,
             model_name=args.model,
             chunks_out=args.chunks_out,
-            use_ocr=args.use_ocr,
         )
         return
 
