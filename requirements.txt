@@ -1,0 +1,4 @@
+chromadb==1.0.10
+pymupdf==1.26.5
+pymupdf4llm==0.0.24
+sentence-transformers==3.4.1
