@@ -27,6 +27,7 @@ BOLD_LINE_RE = re.compile(r"^\*\*([^*]{3,120})\*\*$")
 
 @dataclass
 class ChunkConfig:
+    """Configuration parameters to define length limits for text chunking."""
     target_tokens: int = 800
     max_tokens: int = 1000
     hard_max_tokens: int = 1200
@@ -35,10 +36,13 @@ class ChunkConfig:
 
 
 class LocalEmbedder:
+    """Wrapper class to handle text-to-vector encoding models locally."""
     def __init__(self, model_name: str) -> None:
+        """Initializes the local embedder model configuration details tracking parameters."""
         self.model = SentenceTransformer(model_name)
 
     def encode(self, texts: Sequence[str], batch_size: int = 64) -> List[List[float]]:
+        """Runs underlying text strings converting into embedding float dimension list."""
         vectors = self.model.encode(
             list(texts),
             batch_size=batch_size,
@@ -50,14 +54,17 @@ class LocalEmbedder:
 
 
 def approx_token_count(text: str) -> int:
+    """Estimates the number of word tokens in a string based on standard string length tools."""
     return len(WORD_RE.findall(text))
 
 
 def bm25_tokenize(text: str) -> List[str]:
+    """Tokenizes text into alphanumeric characters for keyword scoring analysis."""
     return re.findall(r"[a-z0-9]+", text.lower())
 
 
 def compute_bm25_scores(query: str, documents: Sequence[str], k1: float = 1.5, b: float = 0.75) -> List[float]:
+    """Computes custom BM25 similarity scores for an initial query across a set of document segments."""
     tokenized_docs = [bm25_tokenize(doc) for doc in documents]
     doc_count = len(tokenized_docs)
     if doc_count == 0:
@@ -94,6 +101,7 @@ def compute_bm25_scores(query: str, documents: Sequence[str], k1: float = 1.5, b
 
 
 def tail_words(text: str, token_budget: int) -> str:
+    """Retrieves the final set of words in a text passage to formulate overlap between subsequent chunks."""
     words = text.split()
     if not words:
         return ""
@@ -101,11 +109,13 @@ def tail_words(text: str, token_budget: int) -> str:
 
 
 def stable_chunk_id(source: str, index: int, text: str) -> str:
+    """Generates a stable, hash-based unique string identifier for caching indexing objects."""
     digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:12]
     return f"{Path(source).stem}-{index}-{digest}"
 
 
 def sanitize_markdown(text: str) -> str:
+    """Cleans raw markdown formatting, resolving visual artifact encoding issues."""
     out_lines: List[str] = []
 
     for raw in text.splitlines():
@@ -145,6 +155,7 @@ def sanitize_markdown(text: str) -> str:
 
 
 def strip_repeated_page_boilerplate(pages: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Removes recurring headers/footers appearing frequently across sequence batches."""
     if not pages:
         return []
 
@@ -185,6 +196,7 @@ def strip_repeated_page_boilerplate(pages: Sequence[Dict[str, Any]]) -> List[Dic
 
 
 def extract_pages(pdf_path: Path) -> List[Dict[str, Any]]:
+    """Reads a standard PDF layout mapping directly into chunked semantic markdown text objects."""
     page_chunks = pymupdf4llm.to_markdown(
         str(pdf_path),
         page_chunks=True,
@@ -198,6 +210,7 @@ def extract_pages(pdf_path: Path) -> List[Dict[str, Any]]:
 
 
 def blockify(markdown_text: str) -> List[Dict[str, str]]:
+    """Segment raw markdown text logically apart into structured heading, table, procedure, or paragraph dictionaries."""
     lines = [line.rstrip() for line in markdown_text.splitlines()]
     blocks: List[Dict[str, str]] = []
     i = 0
@@ -262,6 +275,7 @@ def blockify(markdown_text: str) -> List[Dict[str, str]]:
 
 
 def split_large_text(text: str, max_tokens: int) -> List[str]:
+    """Splits a large monolithic text element strictly down to its maximum token limitation size."""
     words = text.split()
     if len(words) <= max_tokens:
         return [text]
@@ -278,6 +292,7 @@ def split_large_text(text: str, max_tokens: int) -> List[str]:
 
 
 def get_default_flags() -> Dict[str, bool]:
+    """Returns default boolean metadata flags mapping various intent characteristics like torque specifics."""
     return {
         "contains_procedure": False,
         "contains_table": False,
@@ -288,6 +303,7 @@ def get_default_flags() -> Dict[str, bool]:
 
 
 class ChunkBuilder:
+    """Stateful builder handler responsible for progressively creating valid tokenized document chunks."""
     def __init__(self, source: str, config: ChunkConfig):
         self.source = source
         self.config = config
@@ -303,6 +319,7 @@ class ChunkBuilder:
         self.last_heading_path = ""
 
     def flush(self) -> None:
+        """Compiles buffered segment state variables mapping them definitively straight into completed chunk chunks list."""
         if not self.current_parts:
             return
 
@@ -341,6 +358,7 @@ class ChunkBuilder:
 
 
 def build_chunks(pages: Sequence[Dict[str, Any]], source: str, config: ChunkConfig) -> List[Dict[str, Any]]:
+    """Runs sequence processing on pages handling content aggregation directly via ChunkBuilder logic instance."""
     builder = ChunkBuilder(source, config)
 
     for page in pages:
@@ -397,6 +415,7 @@ def build_chunks(pages: Sequence[Dict[str, Any]], source: str, config: ChunkConf
 
 
 def write_chunks_jsonl(chunks: Iterable[Dict[str, Any]], out_path: Path) -> None:
+    """Exports semantic chunk dictionary groupings straight downstream parsing format (JSON Lines)."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8") as f:
         for chunk in chunks:
@@ -410,6 +429,7 @@ def ingest(
     model_name: str,
     chunks_out: Path,
 ) -> None:
+    """Orchestrates document initialization logic taking raw PDF elements all the way into ChromaDB encoded entries."""
     pages = extract_pages(pdf_path)
     config = ChunkConfig()
     chunks = build_chunks(pages, source=str(pdf_path), config=config)
@@ -460,6 +480,7 @@ def ingest(
 
 
 def detect_intent(query: str) -> Dict[str, bool]:
+    """Extract intent matching (Procedures, Materials, Torque details) from string query patterns via keyword matching."""
     q = query.lower()
     return {
         "procedure": any(k in q for k in ["how", "step", "procedure", "remove", "install", "adjust"]),
@@ -469,6 +490,7 @@ def detect_intent(query: str) -> Dict[str, bool]:
 
 
 def rerank(query: str, rows: List[Dict[str, Any]], bm25_weight: float = 0.35) -> List[Dict[str, Any]]:
+    """Sorts combined BM25 query values and Chroma distance results mapping exact logical domain significance."""
     intent = detect_intent(query)
     query_terms = set(re.findall(r"[a-z0-9]+", query.lower()))
     query_normalized = " ".join(re.findall(r"[a-z0-9]+", query.lower()))
@@ -519,6 +541,7 @@ def query_collection(
     ollama_url: str = "http://localhost:11434",
     ollama_timeout: int = 180,
 ) -> None:
+    """Queries standard Chroma database running an exact inference logic optionally bridging structured LLM logic mapping."""
     embedder = LocalEmbedder(model_name)
     qvec = embedder.encode([query_text], batch_size=1)[0]
 
@@ -590,6 +613,7 @@ def query_collection(
 
 
 def parse_args() -> argparse.Namespace:
+    """Maps CLI configuration operations handling setup environment defaults connecting directly dynamically."""
     parser = argparse.ArgumentParser(description="Minimal PyMuPDF + Chroma RAG pipeline")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -651,6 +675,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Applies standard runtime entry execution resolving specific subcommand context targets directly."""
     args = parse_args()
     if args.command == "ingest":
         ingest(

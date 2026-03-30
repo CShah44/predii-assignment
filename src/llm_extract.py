@@ -4,6 +4,7 @@ from urllib import error, request
 
 
 def build_extraction_prompt(query: str, contexts: Sequence[str]) -> str:
+    """Builds the prompt string to explicitly guide the LLM for structured JSON extraction."""
     joined_context = "\n\n".join(contexts)
     return (
         "You are an expert automotive assistant.\n"
@@ -28,6 +29,7 @@ def call_ollama_generate(
     base_url: str,
     timeout_seconds: int,
 ) -> str:
+    """Calls a local Ollama API endpoint to generate JSON according to a strict schema."""
     endpoint = base_url.rstrip("/") + "/api/generate"
     
     schema = {
@@ -82,6 +84,7 @@ def extract_structured_specs(
     base_url: str,
     timeout_seconds: int,
 ) -> str:
+    """Orchestrates building the extraction prompt and calling the Ollama LLM to return strictly structured data."""
     prompt = build_extraction_prompt(query=query, contexts=contexts)
     return call_ollama_generate(
         prompt=prompt,
