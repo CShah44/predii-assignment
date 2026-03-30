@@ -52,6 +52,79 @@ Expected JSON shape:
 ]
 ```
 
+## Example Results
+
+Here are some example queries using the `--llm-structured` pipeline mapping against standard mechanics manuals:
+
+**Example 1: Part Number Extraction**
+
+```bash
+python src/rag.py query --db data/processed/chroma --collection manual --q "part number for driveshaft flange" --k 5 --bm25-weight 0.50 --llm-structured --ollama-model "gemma3:4b"
+```
+
+```json
+[
+  {
+    "action_or_component": "Driveshaft flange",
+    "description": "Part number 4782",
+    "value": "4782"
+  }
+]
+```
+
+**Example 2: Procedure & Torque Specifications**
+
+```bash
+python src/rag.py query --db data/processed/chroma --collection manual --q "torque for brake caliper bolts" --k 5 --bm25-weight 0.50 --llm-structured --ollama-model "gemma3:4b"
+```
+
+```json
+[
+  {
+    "action_or_component": "Remove the brake pads.",
+    "description": "For additional information, refer to Brake Pads in this section."
+  },
+  {
+    "action_or_component": "Discard the specified component.",
+    "description": "Follow local disposal regulations."
+  },
+  {
+    "action_or_component": "Apply the specified chemical with a spray can",
+    "description": "Clean the specified component with the specified material"
+  },
+  {
+    "action_or_component": "Tighten the new bolts to 250 Nm (184 lb-ft).",
+    "description": "To install, reverse the removal procedure."
+  }
+]
+```
+
+**Example 3: Conditional Component Identification**
+
+```bash
+python src/rag.py query --db data/processed/chroma --collection manual --q "colors for 9.75 inch drive pinion nut" --k 5 --bm25-weight 0.50 --llm-structured --ollama-model "gemma3:4b"
+```
+
+```json
+[
+  {
+    "action_or_component": "Drive pinion nut",
+    "description": "Green color for axles built before 7/16/07",
+    "value": "19G405"
+  },
+  {
+    "action_or_component": "Drive pinion nut",
+    "description": "White color for axles built after 7/16/07",
+    "value": "4320"
+  },
+  {
+    "action_or_component": "Drive pinion nut",
+    "description": "White color (kit with spacer)",
+    "value": "4C121"
+  }
+]
+```
+
 ## Retrieval Flow Architecture
 
 1. **Semantic Embedding:** The incoming text query is converted into a dense vector representation using the same embedding model utilized during the document ingestion phase.
